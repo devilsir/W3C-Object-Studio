@@ -203,38 +203,6 @@ class EditSession:
     def placed_unit(self, creation_number: int) -> UnitPlacement | None:
         return self.placed_units.by_creation_number(int(creation_number)) if self.placed_units is not None else None
 
-    def placed_unit_at(self, index: int) -> UnitPlacement | None:
-        """Return one placement by its stable file-order index.
-
-        ``creation_number`` is normally unique in World Editor maps, but maps
-        modified by third-party tools can legally contain duplicates (often 0).
-        UI code must therefore never use creation_number as its sole identity.
-        """
-        if self.placed_units is None:
-            return None
-        try:
-            idx = int(index)
-        except Exception:
-            return None
-        if idx < 0 or idx >= len(self.placed_units.units):
-            return None
-        return self.placed_units.units[idx]
-
-    def placed_unit_index(self, unit: UnitPlacement | None) -> int | None:
-        """Return the file-order index for an exact placement object."""
-        if self.placed_units is None or unit is None:
-            return None
-        for idx, candidate in enumerate(self.placed_units.units):
-            if candidate is unit:
-                return idx
-        return None
-
-    def placement_creation_count(self, creation_number: int) -> int:
-        if self.placed_units is None:
-            return 0
-        creation = int(creation_number)
-        return sum(1 for u in self.placed_units.units if int(u.creation_number) == creation)
-
     def placed_heroes(self) -> list[UnitPlacement]:
         return [u for u in self.placed_units_list() if u.is_hero]
 
@@ -314,17 +282,6 @@ class EditSession:
         LOGGER.info("Moved placement creation=%d pos=(%.3f,%.3f)", int(creation_number), float(x), float(y))
         return unit
 
-    def move_placed_unit_at(self, index: int, x: float, y: float) -> UnitPlacement:
-        """Move exactly one placement even when creation_number is duplicated."""
-        unit = self.placed_unit_at(index)
-        if unit is None:
-            raise InjectorError("a instância selecionada não existe em war3mapUnits.doo")
-        unit.x = float(x)
-        unit.y = float(y)
-        self.placed_units_dirty = True
-        LOGGER.info("Moved placement index=%d creation=%d pos=(%.3f,%.3f)", int(index), int(unit.creation_number), float(x), float(y))
-        return unit
-
     def rotate_placed_unit(self, creation_number: int, angle_degrees: float) -> UnitPlacement:
         """Rotate one placement in memory using Warcraft's 0°=east convention."""
         unit = self.placed_unit(int(creation_number))
@@ -334,34 +291,6 @@ class EditSession:
         self.placed_units_dirty = True
         LOGGER.info("Rotated placement creation=%d facing=%.3f", int(creation_number), float(angle_degrees) % 360.0)
         return unit
-
-    def rotate_placed_unit_at(self, index: int, angle_degrees: float) -> UnitPlacement:
-        """Rotate exactly one placement even when creation_number is duplicated."""
-        unit = self.placed_unit_at(index)
-        if unit is None:
-            raise InjectorError("a instância selecionada não existe em war3mapUnits.doo")
-        unit.angle = math.radians(float(angle_degrees) % 360.0)
-        self.placed_units_dirty = True
-        LOGGER.info("Rotated placement index=%d creation=%d facing=%.3f", int(index), int(unit.creation_number), float(angle_degrees) % 360.0)
-        return unit
-
-    def remove_placed_unit_at(self, index: int) -> bool:
-        """Remove one exact placement without collapsing duplicate IDs.
-
-        Original placements with a duplicated creation number cannot be mapped
-        safely to a single generated JASS handle, so destructive removal is
-        refused instead of silently removing the wrong/all instances.
-        """
-        unit = self.placed_unit_at(index)
-        if unit is None:
-            return False
-        creation = int(unit.creation_number)
-        if self.placement_creation_count(creation) > 1 and creation not in self.studio_added_placements:
-            raise InjectorError(
-                f"a instância #{creation} usa um creation_number duplicado; "
-                "a remoção foi bloqueada para não apagar/sincronizar a unidade errada"
-            )
-        return self.remove_placed_unit(creation)
 
     def remove_placed_unit(self, creation_number: int) -> bool:
         """Remove any placement while preserving runtime correctness.
@@ -403,11 +332,6 @@ class EditSession:
         """
         if self.placed_units is None or self.placed_unit(int(creation_number)) is None:
             raise InjectorError("a instância selecionada não existe em war3mapUnits.doo")
-        if self.placement_creation_count(int(creation_number)) != 1:
-            raise InjectorError(
-                f"não é possível sincronizar runtime da instância #{int(creation_number)}: "
-                "creation_number duplicado no war3mapUnits.doo"
-            )
         selected = set(fields or SUPPORTED_RUNTIME_FIELDS) & SUPPORTED_RUNTIME_FIELDS
         if not selected:
             return
@@ -416,59 +340,32 @@ class EditSession:
         LOGGER.info("Forced placement runtime sync creation=%d fields=%s", int(creation_number), sorted(selected))
 
     def placed_runtime_change_sets(self) -> tuple[dict[int, set[str]], dict[int, set[str]]]:
-        """Return (runtime-supported, placement-only) changes since load/save.
-
-        Runtime JASS patches are keyed by World Editor creation_number.  Some
-        third-party maps contain duplicate creation numbers; those records are
-        still editable/savable in war3mapUnits.doo, but a single JASS target
-        cannot be chosen safely.  Duplicate IDs are therefore excluded from
-        runtime patch generation instead of being compared against the wrong
-        baseline record (which used to create false changes for every duplicate).
-        """
+        """Return (runtime-supported, placement-only) changes since map load/last save."""
         if self.placed_units is None or self.placed_units_baseline is None:
             return {}, {}
-
-        def group_by_creation(units):
-            grouped: dict[int, list[UnitPlacement]] = {}
-            for unit in units:
-                grouped.setdefault(int(unit.creation_number), []).append(unit)
-            return grouped
-
-        before_groups = group_by_creation(self.placed_units_baseline.units)
-        current_groups = group_by_creation(self.placed_units.units)
-        duplicate_ids = {
-            creation for creation in (set(before_groups) | set(current_groups))
-            if len(before_groups.get(creation, ())) > 1 or len(current_groups.get(creation, ())) > 1
-        }
-        if duplicate_ids:
-            LOGGER.warning(
-                "Duplicate placement creation_number values detected; runtime sync disabled for ids=%s (DOO editing remains available)",
-                sorted(duplicate_ids)[:64],
-            )
-
+        before = {int(u.creation_number): u for u in self.placed_units_baseline.units}
         runtime: dict[int, set[str]] = {}
         unsupported: dict[int, set[str]] = {}
-        for creation, current_list in current_groups.items():
-            if creation in duplicate_ids or creation in self.studio_added_placements:
+        for current in self.placed_units.units:
+            creation = int(current.creation_number)
+            if creation in self.studio_added_placements:
+                # Studio-created placements are fully regenerated by the marked
+                # creation block, so a second post-create override is unnecessary.
                 continue
-            old_list = before_groups.get(creation, [])
-            if len(current_list) != 1 or len(old_list) != 1:
+            old = before.get(creation)
+            if old is None:
                 continue
-            current = current_list[0]
-            old = old_list[0]
             fields = placement_runtime_changed_fields(old, current)
             if fields:
-                runtime[creation] = fields
+                runtime[int(current.creation_number)] = fields
             other = placement_non_runtime_changed_fields(old, current)
             if other:
-                unsupported[creation] = other
-
+                unsupported[int(current.creation_number)] = other
         for creation, fields in self.placed_runtime_forced.items():
-            creation = int(creation)
-            if creation in duplicate_ids or creation in self.studio_added_placements:
+            if int(creation) in self.studio_added_placements:
                 continue
-            if len(current_groups.get(creation, ())) == 1:
-                runtime.setdefault(creation, set()).update(set(fields) & SUPPORTED_RUNTIME_FIELDS)
+            if self.placed_unit(int(creation)) is not None:
+                runtime.setdefault(int(creation), set()).update(set(fields) & SUPPORTED_RUNTIME_FIELDS)
         return runtime, unsupported
 
     def _unit_numeric_runtime_value(self, rawcode: str, field_id: str) -> float | None:
@@ -504,11 +401,7 @@ class EditSession:
 
         baseline = None
         if self.placed_units_baseline is not None:
-            matches = [u for u in self.placed_units_baseline.units if int(u.creation_number) == int(unit.creation_number)]
-            # Duplicate creation numbers cannot be mapped to one generated JASS
-            # variable reliably.  Fall back to the current position rather than
-            # borrowing another duplicate's baseline coordinates.
-            baseline = matches[0] if len(matches) == 1 else None
+            baseline = self.placed_units_baseline.by_creation_number(int(unit.creation_number))
         return PlacementRuntimeDefaults(
             acquisition=acq,
             hero_strength=hero_stat("ustr", "ustp"),

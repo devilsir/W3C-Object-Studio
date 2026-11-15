@@ -238,14 +238,14 @@ class WorkspaceMixin:
                 for widget in (self.new_object_btn, self.edit_base_btn):
                     widget.state(["disabled"] if on_placements else ["!disabled"])
                 if on_placements:
-                    self.refresh_placed_units_tree(select_id=getattr(self, "_placed_index", None))
+                    self.refresh_placed_units_tree(select_id=getattr(self, "_placed_creation_number", None))
                     try:
                         if self.session:
                             self.refresh_placed_map_view()
                     except Exception:
                         LOGGER.debug("Placement minimap refresh failed", exc_info=True)
                     self.after_idle(self._init_placed_embedded_viewer)
-                    if getattr(self, "_placed_index", None) is not None:
+                    if getattr(self, "_placed_creation_number", None) is not None:
                         self.after(80, self.refresh_placed_visuals)
             except Exception:
                 LOGGER.debug("Main workspace tab update failed", exc_info=True)

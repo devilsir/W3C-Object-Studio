@@ -63,9 +63,6 @@ class PlacedHeroMixin:
         self.placed_drop_rows: list[dict] = []
         self._placed_snapshot: UnitPlacement | None = None
         self._placed_creation_number: int | None = None
-        # Unique UI identity. creation_number is not guaranteed to be unique in
-        # maps modified by external tools, while file-order index always is.
-        self._placed_index: int | None = None
         # UI-level baseline used to detect *actual* user edits. Comparing a
         # placement rebuilt from text fields against the binary snapshot is not
         # reliable because f32 -> decimal -> degrees/radians -> f32 introduces
@@ -394,12 +391,12 @@ class PlacedHeroMixin:
     def _placed_kind_label(self, unit: UnitPlacement) -> str:
         return self._msg("Herói", "Hero") if self._placed_unit_is_hero(unit) else self._msg("Unidade/Item", "Unit/Item")
 
-    def _select_placement_from_map(self, placement_index: int) -> None:
-        """Select a minimap marker by unique file-order placement index."""
+    def _select_placement_from_map(self, creation_number: int) -> None:
+        """Select a minimap marker and mirror that selection in the left list."""
         if not self.session:
             return
-        index = int(placement_index)
-        iid = f"placement:{index}"
+        creation = int(creation_number)
+        iid = f"placement:{creation}"
         tree = getattr(self, "placed_tree", None)
         if tree is None:
             return
@@ -413,7 +410,7 @@ class PlacedHeroMixin:
                 self.placed_filter_display_var.set(self._placed_filter_values()[0])
             except Exception:
                 pass
-            self.refresh_placed_units_tree(select_id=index)
+            self.refresh_placed_units_tree(select_id=creation)
         if tree.exists(iid):
             self._placed_tree_guard = False
             tree.selection_set(iid)
@@ -421,52 +418,50 @@ class PlacedHeroMixin:
             tree.see(iid)
             self.on_placed_tree()
 
-    def _move_placement_from_map(self, placement_index: int, x: float, y: float) -> None:
+    def _move_placement_from_map(self, creation_number: int, x: float, y: float) -> None:
         if not self.session:
             return
         try:
-            index = int(placement_index)
-            unit = self.session.move_placed_unit_at(index, float(x), float(y))
-            if self._placed_snapshot is not None and self._placed_index == index:
+            unit = self.session.move_placed_unit(int(creation_number), float(x), float(y))
+            if self._placed_snapshot is not None and int(self._placed_snapshot.creation_number) == int(creation_number):
                 self._placed_snapshot.x = float(x)
                 self._placed_snapshot.y = float(y)
                 try:
                     self.placed_position_label.configure(text=f"X {unit.x:.1f}  Y {unit.y:.1f}  Z {unit.z:.1f}")
                 except Exception:
                     pass
-            self.refresh_placed_units_tree(select_id=index)
+            self.refresh_placed_units_tree(select_id=unit.creation_number)
             self.status.set(self._msg(
-                f"Instância #{unit.creation_number} movida para X {unit.x:.1f}, Y {unit.y:.1f}. SALVAR grava o DOO; runtime só é sincronizado quando o creation_number é único.",
-                f"Instance #{unit.creation_number} moved to X {unit.x:.1f}, Y {unit.y:.1f}. SAVE writes the DOO; runtime is synchronized only when creation_number is unique.",
+                f"Instância #{unit.creation_number} movida para X {unit.x:.1f}, Y {unit.y:.1f}. SALVAR grava DOO + posição runtime.",
+                f"Instance #{unit.creation_number} moved to X {unit.x:.1f}, Y {unit.y:.1f}. SAVE writes DOO + runtime position.",
             ))
         except Exception as exc:
             LOGGER.exception("Visual placement move failed")
             messagebox.showerror(self._msg("Mover unidade", "Move unit"), str(exc), parent=self)
 
-    def _rotate_placement_from_map(self, placement_index: int, angle_degrees: float) -> None:
+    def _rotate_placement_from_map(self, creation_number: int, angle_degrees: float) -> None:
         if not self.session:
             return
         try:
-            index = int(placement_index)
-            unit = self.session.rotate_placed_unit_at(index, float(angle_degrees))
-            if self._placed_snapshot is not None and self._placed_index == index:
+            unit = self.session.rotate_placed_unit(int(creation_number), float(angle_degrees))
+            if self._placed_snapshot is not None and int(self._placed_snapshot.creation_number) == int(creation_number):
                 self._placed_snapshot.angle = float(unit.angle)
                 try:
                     self.placed_facing_var.set(f"{float(angle_degrees) % 360.0:.3f}")
                 except Exception:
                     pass
-            self.refresh_placed_units_tree(select_id=index)
+            self.refresh_placed_units_tree(select_id=unit.creation_number)
             self.status.set(self._msg(
-                f"Instância #{unit.creation_number} rotacionada para {float(angle_degrees) % 360.0:.1f}°. SALVAR grava o DOO; runtime só é sincronizado quando o creation_number é único.",
-                f"Instance #{unit.creation_number} rotated to {float(angle_degrees) % 360.0:.1f}°. SAVE writes the DOO; runtime is synchronized only when creation_number is unique.",
+                f"Instância #{unit.creation_number} rotacionada para {float(angle_degrees) % 360.0:.1f}°. SALVAR grava DOO + facing runtime.",
+                f"Instance #{unit.creation_number} rotated to {float(angle_degrees) % 360.0:.1f}°. SAVE writes DOO + runtime facing.",
             ))
         except Exception as exc:
             LOGGER.exception("Visual placement rotation failed")
             messagebox.showerror(self._msg("Rotacionar unidade", "Rotate unit"), str(exc), parent=self)
 
-    def _remove_placement_from_map(self, placement_index: int) -> None:
+    def _remove_placement_from_map(self, creation_number: int) -> None:
         try:
-            self._select_placement_from_map(int(placement_index))
+            self._select_placement_from_map(int(creation_number))
         except Exception:
             pass
         self.remove_selected_studio_placement()
@@ -478,7 +473,7 @@ class PlacedHeroMixin:
         units = self.session.placed_units_list() if self.session else []
         added = self.session.studio_added_placements if self.session else set()
         if selected is None:
-            selected = getattr(self, "_placed_index", None)
+            selected = getattr(self, "_placed_creation_number", None)
         view.set_units(units, studio_added=added, selected=selected)
 
     def refresh_placed_map_view(self) -> None:
@@ -552,7 +547,7 @@ class PlacedHeroMixin:
         query = self.placed_search_var.get().strip().casefold()
         mode = self.placed_filter_var.get()
         rows = []
-        for placement_index, unit in enumerate(self.session.placed_units_list()):
+        for unit in self.session.placed_units_list():
             if mode == "heroes" and not self._placed_unit_is_hero(unit):
                 continue
             if mode == "other" and self._placed_unit_is_hero(unit):
@@ -563,18 +558,14 @@ class PlacedHeroMixin:
             hay = f"{unit.creation_number} {unit.unit_id} {name} {owner} {kind} {unit.hero_level}".casefold()
             if query and query not in hay:
                 continue
-            rows.append((placement_index, unit, name, owner, kind))
-        rows.sort(key=lambda r: (r[2].casefold(), r[1].creation_number, r[0]))
-        for placement_index, unit, name, owner, kind in rows:
-            # Tk Treeview item IDs must be unique. creation_number is *not* a
-            # safe IID because externally modified maps can contain duplicates.
-            iid = f"placement:{placement_index}"
+            rows.append((unit, name, owner, kind))
+        rows.sort(key=lambda r: (r[1].casefold(), r[0].creation_number))
+        for unit, name, owner, kind in rows:
+            iid = f"placement:{unit.creation_number}"
             level = str(unit.hero_level) if self._placed_unit_is_hero(unit) else "—"
             tree.insert("", "end", iid=iid, values=(f"#{unit.creation_number}  {name}  [{unit.unit_id}]", owner, kind, level))
         total = len(self.session.placed_units.units)
         self.placed_count_var.set(self._msg(f"{len(rows)} exibidos · {total} placements no mapa", f"{len(rows)} shown · {total} placements in map"))
-        if select_id is None:
-            select_id = getattr(self, "_placed_index", None)
         if select_id is not None:
             iid = f"placement:{int(select_id)}"
             if tree.exists(iid):
@@ -633,7 +624,7 @@ class PlacedHeroMixin:
         )
 
     def _placed_unit_ui_dirty(self) -> bool:
-        if self._placed_snapshot is None or self._placed_index is None:
+        if self._placed_snapshot is None or self._placed_creation_number is None:
             return False
         baseline = getattr(self, "_placed_ui_initial_signature", None)
         if baseline is None:
@@ -651,10 +642,10 @@ class PlacedHeroMixin:
         if not sel:
             return
         try:
-            placement_index = int(sel[0].split(":", 1)[1])
+            creation = int(sel[0].split(":", 1)[1])
         except Exception:
             return
-        if self._placed_index == placement_index:
+        if self._placed_creation_number == creation:
             return
         if self._placed_unit_ui_dirty():
             leave = messagebox.askyesno(
@@ -665,23 +656,22 @@ class PlacedHeroMixin:
                 ), parent=self,
             )
             if not leave:
-                old = self._placed_index
+                old = self._placed_creation_number
                 if old is not None:
                     self.refresh_placed_units_tree(select_id=old)
                 return
-        unit = self.session.placed_unit_at(placement_index)
+        unit = self.session.placed_unit(creation)
         if unit is None:
             return
         self.placed_title_var.set(self._placed_unit_display_name(unit.unit_id))
         self.placed_meta_var.set(self._msg(
-            f"{unit.unit_id} · instância #{unit.creation_number} · registro {placement_index} · {player_label(unit.player, self.language)}" + (f" · nível {unit.hero_level}" if self._placed_unit_is_hero(unit) else ""),
-            f"{unit.unit_id} · instance #{unit.creation_number} · record {placement_index} · {player_label(unit.player, self.language)}" + (f" · level {unit.hero_level}" if self._placed_unit_is_hero(unit) else ""),
+            f"{unit.unit_id} · instância #{unit.creation_number} · {player_label(unit.player, self.language)}" + (f" · nível {unit.hero_level}" if self._placed_unit_is_hero(unit) else ""),
+            f"{unit.unit_id} · instance #{unit.creation_number} · {player_label(unit.player, self.language)}" + (f" · level {unit.hero_level}" if self._placed_unit_is_hero(unit) else ""),
         ))
-        self._placed_index = placement_index
         self.build_placed_hero_form(unit)
         self.refresh_placed_visuals(unit)
         try:
-            self.placed_map_view.set_selected(placement_index)
+            self.placed_map_view.set_selected(unit.creation_number)
         except Exception:
             LOGGER.debug("Could not mirror placement selection on map", exc_info=True)
         try:
@@ -736,7 +726,7 @@ class PlacedHeroMixin:
             self._placed_snapshot = snapshot
             # Preserve whether the draft was dirty before the language rebuild.
             self._placed_ui_initial_signature = initial_ui_signature
-        self.refresh_placed_units_tree(select_id=self._placed_index)
+        self.refresh_placed_units_tree(select_id=self._placed_creation_number)
 
     def _placed_asset_preference(self) -> str:
         value = str(self.placed_model_asset_mode_var.get() if hasattr(self, "placed_model_asset_mode_var") else "Reforged HD").casefold()
@@ -795,7 +785,7 @@ class PlacedHeroMixin:
             self.placed_preview_fallback.place_forget()
         except Exception:
             pass
-        if getattr(self, "_placed_index", None) is not None:
+        if getattr(self, "_placed_creation_number", None) is not None:
             self.refresh_placed_visuals()
 
     def _placed_web_failed(self, exc):
@@ -843,8 +833,8 @@ class PlacedHeroMixin:
         if not self.session:
             self._clear_placed_visuals(self._msg("Abra um mapa primeiro.", "Open a map first."))
             return
-        if unit is None and self._placed_index is not None:
-            unit = self.session.placed_unit_at(self._placed_index)
+        if unit is None and self._placed_creation_number is not None:
+            unit = self.session.placed_unit(self._placed_creation_number)
         if unit is None:
             self._clear_placed_visuals(self._msg("Selecione uma unidade colocada.", "Select a placed unit."))
             return
@@ -961,7 +951,7 @@ class PlacedHeroMixin:
         threading.Thread(target=worker, daemon=True, name="wc3-placed-visual").start()
 
     def _show_placed_visual_result(self, serial: int, creation: int, rawcode: str, files, model_path, model_actual, missing, icon_data, icon_actual, source: str, mode: str) -> None:
-        if serial != self.placed_visual_serial:
+        if serial != self.placed_visual_serial or creation != self._placed_creation_number:
             return
         if icon_data:
             try:
@@ -1243,10 +1233,6 @@ class PlacedHeroMixin:
     def load_placed_hero_form(self, unit: UnitPlacement) -> None:
         self._ensure_placed_state()
         self._placed_creation_number = unit.creation_number
-        if self.session is not None:
-            resolved_index = self.session.placed_unit_index(unit)
-            if resolved_index is not None:
-                self._placed_index = resolved_index
         self._placed_snapshot = copy.deepcopy(unit)
         label = player_label(unit.player, self.language)
         if label not in self._placed_owner_lookup:
@@ -1681,7 +1667,7 @@ class PlacedHeroMixin:
 
     def force_sync_placed_runtime(self) -> bool:
         """Repair stale compiled JASS for the currently selected placement."""
-        if not self.session or self._placed_index is None:
+        if not self.session or self._placed_creation_number is None:
             return False
         # First apply the visible form so the runtime patch always reflects
         # exactly what the user is looking at, including the already-correct
@@ -1700,9 +1686,9 @@ class PlacedHeroMixin:
             return False
 
     def apply_placed_hero(self) -> bool:
-        if not self.session or self._placed_index is None:
+        if not self.session or self._placed_creation_number is None:
             return False
-        target=self.session.placed_unit_at(self._placed_index)
+        target=self.session.placed_unit(self._placed_creation_number)
         if target is None:
             messagebox.showerror(self._msg("Unidade no mapa","Placed unit"),self._msg("A instância selecionada não existe mais.","The selected instance no longer exists."),parent=self)
             return False
@@ -1717,7 +1703,7 @@ class PlacedHeroMixin:
                 f"Instância #{target.creation_number}: aplicada em memória. SALVAR grava o DOO e sincroniza no JASS apenas os campos de runtime que realmente mudaram.",
                 f"Instance #{target.creation_number}: applied in memory. SAVE writes the DOO and syncs only runtime fields that actually changed into JASS.",
             ))
-            self.refresh_placed_units_tree(select_id=self._placed_index)
+            self.refresh_placed_units_tree(select_id=target.creation_number)
             return True
         except Exception as exc:
             self._error_box(self._msg("Não foi possível aplicar na instância","Could not apply to instance"),"apply_placed_hero",exc)

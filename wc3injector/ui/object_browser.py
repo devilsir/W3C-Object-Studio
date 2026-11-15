@@ -128,23 +128,14 @@ class ObjectBrowserMixin:
                 # draft and populate it from this map's war3mapUnits.doo.
                 self._placed_snapshot = None
                 self._placed_creation_number = None
-                self._placed_index = None
                 try:
                     self.placed_title_var.set(self._msg("Selecione uma unidade colocada", "Select a placed unit"))
                     self.placed_meta_var.set("")
                     self.placed_apply_btn.state(["disabled"])
-                except Exception:
-                    LOGGER.debug("Could not reset Units on Map workspace", exc_info=True)
-                # Keep list and terrain refresh independent. A malformed/duplicate
-                # placement must never prevent war3map.w3e from being rendered.
-                try:
                     self.refresh_placed_units_tree()
-                except Exception:
-                    LOGGER.exception("Could not refresh Units on Map placement list")
-                try:
                     self.refresh_placed_map_view()
                 except Exception:
-                    LOGGER.exception("Could not refresh Units on Map terrain surface")
+                    LOGGER.debug("Could not refresh Units on Map workspace", exc_info=True)
             except Exception as exc:
                 self.session=None
                 self._error_box(self._msg("Falha ao abrir mapa", "Failed to open map"), "pick_map / EditSession.load", exc)
@@ -197,22 +188,21 @@ class ObjectBrowserMixin:
             kind=self.kind_var.get(); query=self.search_var.get().strip().casefold()
             scope=getattr(self,"scope_var",tk.StringVar(value="all")).get()
             if kind == "placed_hero":
+                heroes = self.session.placed_heroes()
                 rows=[]
-                for placement_index, unit in enumerate(self.session.placed_units_list()):
-                    if not self._placed_unit_is_hero(unit):
-                        continue
+                for unit in heroes:
                     name=self._placed_unit_display_name(unit.unit_id)
                     owner=player_label(unit.player,self.language)
                     hay=f"{unit.unit_id} {unit.creation_number} {name} {owner} {unit.hero_level}".casefold()
                     if query and query not in hay:
                         continue
-                    rows.append((placement_index,unit,name,owner))
+                    rows.append((unit,name,owner))
                 col=self.tree_sort_column
-                if col=="base": rows.sort(key=lambda x:(x[3].casefold(),x[2].casefold(),x[1].creation_number,x[0]),reverse=self.tree_sort_reverse)
-                elif col=="table": rows.sort(key=lambda x:(x[1].hero_level,x[2].casefold(),x[0]),reverse=self.tree_sort_reverse)
-                else: rows.sort(key=lambda x:(x[2].casefold(),x[1].creation_number,x[0]),reverse=self.tree_sort_reverse)
-                for placement_index,unit,name,owner in rows:
-                    iid=f"placed:{placement_index}"
+                if col=="base": rows.sort(key=lambda x:(x[2].casefold(),x[1].casefold(),x[0].creation_number),reverse=self.tree_sort_reverse)
+                elif col=="table": rows.sort(key=lambda x:(x[0].hero_level,x[1].casefold()),reverse=self.tree_sort_reverse)
+                else: rows.sort(key=lambda x:(x[1].casefold(),x[0].creation_number),reverse=self.tree_sort_reverse)
+                for unit,name,owner in rows:
+                    iid=f"placed:{unit.creation_number}"
                     self.tree.insert("","end",iid=iid,values=(f"#{unit.creation_number}  {name}  [{unit.unit_id}]",owner,str(unit.hero_level)))
                 if select_id is not None:
                     iid=f"placed:{select_id}"
@@ -284,15 +274,13 @@ class ObjectBrowserMixin:
                 if table != "placed":
                     return
                 try:
-                    placement_index=int(oid)
+                    creation=int(oid)
                 except Exception:
                     return
-                unit=self.session.placed_unit_at(placement_index)
-                if unit is None or not self._placed_unit_is_hero(unit):
+                unit=self.session.placed_hero(creation)
+                if unit is None:
                     return
-                creation=int(unit.creation_number)
-                self._placed_index=placement_index
-                self.current_kind="placed_hero"; self.current_table="placement"; self.current_id=str(placement_index); self.current_base=unit.unit_id
+                self.current_kind="placed_hero"; self.current_table="placement"; self.current_id=str(creation); self.current_base=unit.unit_id
                 self.working_mods=[]; self.current_level=1; self.level_var.set(1)
                 self._selection_snapshot_mods=[]
                 self._selection_snapshot_assets=copy.deepcopy(self.session.staged_assets)

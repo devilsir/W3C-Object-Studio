@@ -13,7 +13,7 @@ from ..ability_native import resolve_ability_profile
 from ..unit_native import resolve_unit_visual
 from ..debuglog import configure_logging, log_exception
 from ..modelscan import scan_model
-from ..storm import StormArchive
+from ..storm import StormArchive, safe_archive_relpath
 from .editor_values import ABILITY_EFFECT_FIELDS
 
 LOGGER, _SESSION_LOG = configure_logging()
@@ -30,14 +30,10 @@ class AssetExportMixin:
     """
 
     @staticmethod
-    def _export_zip_path(path: str) -> str:
-        text = str(path or "").replace("/", "\\")
-        # CASC paths are archive chains such as war3.w3mod:_hd.w3mod:Units\...
-        if ":" in text:
-            text = text.rsplit(":", 1)[-1]
-        text = re.sub(r"\\+", r"\\", text).lstrip("\\")
-        parts = [p for p in text.split("\\") if p not in {"", ".", ".."}]
-        return "/".join(parts)
+    def _export_zip_path(path: str | bytes) -> str:
+        # Keep ordinary Warcraft paths unchanged, but map legacy byte-names and
+        # Win32-illegal components to deterministic safe names.
+        return safe_archive_relpath(path, fallback="exported_asset.bin")
 
     @staticmethod
     def _clean_export_filename(text: str) -> str:
@@ -276,7 +272,7 @@ class AssetExportMixin:
                 "texture payload as .dds; export_manifest.json records every resolved mapping.\n"
             )
             zf.writestr("README_EXPORT.txt", readme)
-            zf.writestr("export_manifest.json", json.dumps(manifest, ensure_ascii=False, indent=2))
+            zf.writestr("export_manifest.json", json.dumps(manifest, ensure_ascii=True, indent=2))
 
         return {
             "models": len(manifest["models"]),
@@ -455,9 +451,9 @@ class AssetExportMixin:
             LOGGER.debug("Unit icon lookup failed for %s", rawcode, exc_info=True)
 
         # Placement skin IDs may select a different native icon than the type.
-        if placed and getattr(self, "_placed_index", None) is not None:
+        if placed and getattr(self, "_placed_creation_number", None) is not None:
             try:
-                unit = self.session.placed_unit_at(self._placed_index)
+                unit = self.session.placed_unit(self._placed_creation_number)
                 skin = str(getattr(unit, "skin_id", "") or "").strip("\0 ") if unit else ""
                 install = detect_warcraft_install()
                 if install:
@@ -486,10 +482,10 @@ class AssetExportMixin:
         self._export_icon_bundle_dialog(self.current_id, self._unit_icon_seed_refs(self.current_id), kind="unit")
 
     def export_placed_icon_bundle(self) -> None:
-        if not self.session or getattr(self, "_placed_index", None) is None:
+        if not self.session or getattr(self, "_placed_creation_number", None) is None:
             messagebox.showinfo(self._msg("Exportar ícones", "Export icons"), self._msg("Selecione uma unidade colocada primeiro.", "Select a placed unit first."), parent=self)
             return
-        unit = self.session.placed_unit_at(self._placed_index)
+        unit = self.session.placed_unit(self._placed_creation_number)
         if unit is None:
             return
         self._export_icon_bundle_dialog(unit.unit_id, self._unit_icon_seed_refs(unit.unit_id, placed=True), kind="placed_unit")
@@ -596,7 +592,7 @@ class AssetExportMixin:
                         write(zf, actual, data, label, "explicit", ref)
                     else:
                         manifest["missing_explicit"].append({"label": label, "path": seed})
-            zf.writestr("icons_manifest.json", json.dumps(manifest, ensure_ascii=False, indent=2))
+            zf.writestr("icons_manifest.json", json.dumps(manifest, ensure_ascii=True, indent=2))
             zf.writestr("README_ICONS.txt", self._msg(
                 "WC3 Object Studio — exportação de ícones\nInclui todas as variantes encontradas (BTN, DISBTN, PAS/DISPAS e ATC/DISATC), além de Art/Unart/Researchart quando a habilidade fornece esses caminhos.\n",
                 "WC3 Object Studio — icon export\nIncludes every variant found (BTN, DISBTN, PAS/DISPAS and ATC/DISATC), plus Art/Unart/Researchart when the ability provides those paths.\n",

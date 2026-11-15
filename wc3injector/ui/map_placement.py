@@ -545,14 +545,11 @@ class MapPlacementCanvas(ttk.Frame):
     def set_units(self, units: Iterable[object], *, studio_added: Iterable[int] = (), selected: int | None = None) -> None:
         self._units = list(units)
         self._studio_added = {int(x) for x in studio_added}
-        # Selection identity is the placement's file-order index, not
-        # creation_number. Third-party maps may contain duplicate creation
-        # numbers, while an index is always unique inside the loaded DOO.
         self._selected = int(selected) if selected is not None else None
         self.redraw()
 
-    def set_selected(self, placement_index: int | None) -> None:
-        self._selected = int(placement_index) if placement_index is not None else None
+    def set_selected(self, creation_number: int | None) -> None:
+        self._selected = int(creation_number) if creation_number is not None else None
         self.redraw()
 
     def begin_placement(self, label: str, callback: Callable[[float, float], None]) -> None:
@@ -644,11 +641,12 @@ class MapPlacementCanvas(ttk.Frame):
         ny = 1.0 - (py - t) / (b - t)
         return self._bounds.min_x + nx * self._bounds.width, self._bounds.min_y + ny * self._bounds.height
 
-    def _unit_display_state(self, unit, placement_index: int) -> tuple[float, float, float]:
+    def _unit_display_state(self, unit) -> tuple[float, float, float]:
+        creation = int(getattr(unit, "creation_number", -1))
         x = float(getattr(unit, "x", 0.0))
         y = float(getattr(unit, "y", 0.0))
         angle = float(getattr(unit, "angle", 0.0))
-        if int(placement_index) == self._drag_creation:
+        if creation == self._drag_creation:
             if self._drag_preview_pos is not None:
                 x, y = self._drag_preview_pos
             if self._drag_preview_angle is not None:
@@ -691,16 +689,16 @@ class MapPlacementCanvas(ttk.Frame):
 
         c.create_rectangle(l, t, r, b, outline="#7c8796", width=1)
 
-        for placement_index, unit in enumerate(self._units):
+        for unit in self._units:
             try:
                 creation = int(getattr(unit, "creation_number"))
-                uxw, uyw, angle = self._unit_display_state(unit, placement_index)
+                uxw, uyw, angle = self._unit_display_state(unit)
                 x, y = self.world_to_canvas(uxw, uyw)
                 player = int(getattr(unit, "player", 0))
             except Exception:
                 continue
             color = _PLAYER_COLORS[player] if 0 <= player < len(_PLAYER_COLORS) else "#e7e7e7"
-            size = 10.0 if placement_index == self._selected else 7.5
+            size = 10.0 if creation == self._selected else 7.5
             ux = math.cos(angle)
             uy = -math.sin(angle)
             pxv = -uy
@@ -708,14 +706,14 @@ class MapPlacementCanvas(ttk.Frame):
             nose = (x + ux * size * 1.45, y + uy * size * 1.45)
             rear1 = (x - ux * size + pxv * size * .72, y - uy * size + pyv * size * .72)
             rear2 = (x - ux * size - pxv * size * .72, y - uy * size - pyv * size * .72)
-            outline = "#ffffff" if placement_index == self._selected else ("#8cf0a9" if creation in self._studio_added else "#17191d")
-            width = 3 if placement_index == self._selected else 2
+            outline = "#ffffff" if creation == self._selected else ("#8cf0a9" if creation in self._studio_added else "#17191d")
+            width = 3 if creation == self._selected else 2
             c.create_polygon(
                 nose[0], nose[1], rear1[0], rear1[1], rear2[0], rear2[1],
                 fill=color, outline=outline, width=width,
-                tags=("placement", f"placement:{placement_index}"),
+                tags=("placement", f"placement:{creation}"),
             )
-            if placement_index == self._selected:
+            if creation == self._selected:
                 raw = str(getattr(unit, "unit_id", ""))
                 c.create_text(x, y-20, text=f"#{creation} [{raw}]", fill="#ffffff", font=("Segoe UI", 9, "bold"), tags=("selection-label",))
                 if self._tool == "rotate" or self._drag_preview_angle is not None:
@@ -727,24 +725,20 @@ class MapPlacementCanvas(ttk.Frame):
     def _nearest_marker(self, px: float, py: float, radius: float = 15.0) -> int | None:
         best = None
         best_d2 = radius * radius
-        for placement_index, unit in enumerate(self._units):
+        for unit in self._units:
             try:
-                uxw, uyw, _a = self._unit_display_state(unit, placement_index)
+                uxw, uyw, _a = self._unit_display_state(unit)
                 x, y = self.world_to_canvas(uxw, uyw)
                 d2 = (x-px)*(x-px) + (y-py)*(y-py)
                 if d2 <= best_d2:
                     best_d2 = d2
-                    best = placement_index
+                    best = int(getattr(unit, "creation_number"))
             except Exception:
                 continue
         return best
 
-    def _unit_by_index(self, placement_index: int):
-        try:
-            idx = int(placement_index)
-            return self._units[idx] if 0 <= idx < len(self._units) else None
-        except Exception:
-            return None
+    def _unit_by_creation(self, creation: int):
+        return next((u for u in self._units if int(getattr(u, "creation_number", -1)) == int(creation)), None)
 
     def _on_press(self, event) -> None:
         self.canvas.focus_set()
@@ -757,15 +751,15 @@ class MapPlacementCanvas(ttk.Frame):
             callback(float(world[0]), float(world[1]))
             return
 
-        placement_index = self._nearest_marker(event.x, event.y)
-        if placement_index is not None:
-            self._selected = placement_index
+        creation = self._nearest_marker(event.x, event.y)
+        if creation is not None:
+            self._selected = creation
             if self._on_select is not None:
-                self._on_select(placement_index)
+                self._on_select(creation)
             if self._tool in {"move", "rotate"}:
-                self._drag_creation = placement_index
+                self._drag_creation = creation
                 self._drag_started = True
-                unit = self._unit_by_index(placement_index)
+                unit = self._unit_by_creation(creation)
                 if unit is not None:
                     self._drag_preview_pos = (float(getattr(unit, "x", 0.0)), float(getattr(unit, "y", 0.0)))
                     self._drag_preview_angle = float(getattr(unit, "angle", 0.0))
@@ -777,7 +771,7 @@ class MapPlacementCanvas(ttk.Frame):
     def _on_drag(self, event) -> None:
         if self._placement_callback is not None or self._drag_creation is None:
             return
-        unit = self._unit_by_index(self._drag_creation)
+        unit = self._unit_by_creation(self._drag_creation)
         if unit is None:
             return
         if self._tool == "move":
@@ -785,13 +779,12 @@ class MapPlacementCanvas(ttk.Frame):
             if world is None:
                 return
             self._drag_preview_pos = (float(world[0]), float(world[1]))
-            creation = int(getattr(unit, "creation_number", -1))
             self.status_var.set(self._msg(
-                f"MOVER #{creation} → X {world[0]:.1f} · Y {world[1]:.1f}",
-                f"MOVE #{creation} → X {world[0]:.1f} · Y {world[1]:.1f}",
+                f"MOVER #{self._drag_creation} → X {world[0]:.1f} · Y {world[1]:.1f}",
+                f"MOVE #{self._drag_creation} → X {world[0]:.1f} · Y {world[1]:.1f}",
             ))
         elif self._tool == "rotate":
-            uxw, uyw, _angle = self._unit_display_state(unit, self._drag_creation)
+            uxw, uyw, _angle = self._unit_display_state(unit)
             cx, cy = self.world_to_canvas(uxw, uyw)
             dx = float(event.x) - cx
             dy_world = cy - float(event.y)
@@ -799,24 +792,23 @@ class MapPlacementCanvas(ttk.Frame):
                 return
             deg = math.degrees(math.atan2(dy_world, dx)) % 360.0
             self._drag_preview_angle = math.radians(deg)
-            creation = int(getattr(unit, "creation_number", -1))
             self.status_var.set(self._msg(
-                f"ROTACIONAR #{creation} → {deg:.1f}°",
-                f"ROTATE #{creation} → {deg:.1f}°",
+                f"ROTACIONAR #{self._drag_creation} → {deg:.1f}°",
+                f"ROTATE #{self._drag_creation} → {deg:.1f}°",
             ))
         self.redraw()
 
     def _on_release(self, _event) -> None:
         if self._drag_creation is None or not self._drag_started:
             return
-        placement_index = int(self._drag_creation)
+        creation = int(self._drag_creation)
         try:
             if self._tool == "move" and self._drag_preview_pos is not None and self._on_move is not None:
                 x, y = self._drag_preview_pos
-                self._on_move(placement_index, float(x), float(y))
+                self._on_move(creation, float(x), float(y))
             elif self._tool == "rotate" and self._drag_preview_angle is not None and self._on_rotate is not None:
                 deg = math.degrees(float(self._drag_preview_angle)) % 360.0
-                self._on_rotate(placement_index, deg)
+                self._on_rotate(creation, deg)
         finally:
             self._drag_creation = None
             self._drag_preview_pos = None
@@ -837,13 +829,12 @@ class MapPlacementCanvas(ttk.Frame):
                 f"Click to place {self._placement_label} at X {x:.1f} · Y {y:.1f}",
             ))
             return
-        placement_index = self._nearest_marker(event.x, event.y)
-        if placement_index is not None:
+        creation = self._nearest_marker(event.x, event.y)
+        if creation is not None:
             cursor = "fleur" if self._tool == "move" else ("crosshair" if self._tool == "rotate" else "hand2")
             self.canvas.configure(cursor=cursor)
-            unit = self._unit_by_index(placement_index)
+            unit = self._unit_by_creation(creation)
             raw = str(getattr(unit, "unit_id", "")) if unit is not None else ""
-            creation = int(getattr(unit, "creation_number", -1)) if unit is not None else -1
             self.status_var.set(self._msg(
                 f"Instância #{creation} [{raw}] · X {x:.1f} · Y {y:.1f}",
                 f"Instance #{creation} [{raw}] · X {x:.1f} · Y {y:.1f}",

@@ -116,23 +116,17 @@ class AssetImporterMixin:
             return rf"ReplaceableTextures\CommandButtons\{path.name}"
         return rf"{self.ASSET_IMPORT_ROOT}\Textures\{path.name}"
 
-    def _selected_placement_index(self) -> int | None:
-        tree = getattr(self, "placed_tree", None)
-        if tree is not None:
-            sel = tree.selection()
-            if sel:
-                try:
-                    return int(sel[0].split(":", 1)[1])
-                except Exception:
-                    pass
-        return getattr(self, "_placed_index", None)
-
     def _selected_placement_creation(self) -> int | None:
-        if not self.session:
-            return None
-        index = self._selected_placement_index()
-        unit = self.session.placed_unit_at(index) if index is not None else None
-        return int(unit.creation_number) if unit is not None else getattr(self, "_placed_creation_number", None)
+        tree = getattr(self, "placed_tree", None)
+        if tree is None:
+            return getattr(self, "_placed_creation_number", None)
+        sel = tree.selection()
+        if not sel:
+            return getattr(self, "_placed_creation_number", None)
+        try:
+            return int(sel[0].split(":", 1)[1])
+        except Exception:
+            return getattr(self, "_placed_creation_number", None)
 
     # ------------------------------------------------------------------
     # Add one existing unit type to the map
@@ -312,7 +306,7 @@ class AssetImporterMixin:
                     hero_level=max(1, int(level_var.get())),
                 )
                 if hasattr(self, "refresh_placed_units_tree"):
-                    self.refresh_placed_units_tree(select_id=self.session.placed_unit_index(unit))
+                    self.refresh_placed_units_tree(select_id=unit.creation_number)
                 self.status.set(self._msg(
                     f"{raw} adicionado como instância #{unit.creation_number}. SALVAR grava DOO + criação JASS mínima.",
                     f"{raw} added as instance #{unit.creation_number}. SAVE writes DOO + minimal JASS creation.",
@@ -387,9 +381,9 @@ class AssetImporterMixin:
                     raw, x=x, y=y, angle_degrees=facing, player=owner,
                     scale=scale, hero_level=hero_level,
                 )
-                self.refresh_placed_units_tree(select_id=self.session.placed_unit_index(unit))
+                self.refresh_placed_units_tree(select_id=unit.creation_number)
                 try:
-                    self._select_placement_from_map(self.session.placed_unit_index(unit))
+                    self._select_placement_from_map(unit.creation_number)
                 except Exception:
                     pass
                 self.status.set(self._msg(
@@ -446,7 +440,7 @@ class AssetImporterMixin:
                     )
                     queue.pop(0)
                     placed_count += 1
-                    self.refresh_placed_units_tree(select_id=self.session.placed_unit_index(unit))
+                    self.refresh_placed_units_tree(select_id=unit.creation_number)
                     self.status.set(self._msg(
                         f"{Path(model).name}: colocado em X {x:.1f}, Y {y:.1f}. Restam {len(queue)}.",
                         f"{Path(model).name}: placed at X {x:.1f}, Y {y:.1f}. {len(queue)} remaining.",
@@ -469,18 +463,17 @@ class AssetImporterMixin:
         """
         if not self.session:
             return
-        placement_index = self._selected_placement_index()
-        if placement_index is None:
+        creation = self._selected_placement_creation()
+        if creation is None:
             messagebox.showinfo(
                 self._msg("Remover unidade", "Remove unit"),
                 self._msg("Selecione uma unidade colocada primeiro.", "Select a placed unit first."),
                 parent=self,
             )
             return
-        unit = self.session.placed_unit_at(placement_index)
+        unit = self.session.placed_unit(creation)
         if unit is None:
             return
-        creation = int(unit.creation_number)
         name = self._asset_unit_name(unit.unit_id)
         was_studio = creation in self.session.studio_added_placements
         detail = self._msg(
@@ -503,9 +496,8 @@ class AssetImporterMixin:
         ):
             return
         try:
-            self.session.remove_placed_unit_at(placement_index)
+            self.session.remove_placed_unit(creation)
             self._placed_creation_number = None
-            self._placed_index = None
             self._placed_snapshot = None
             if hasattr(self, "refresh_placed_units_tree"):
                 self.refresh_placed_units_tree()
@@ -801,7 +793,7 @@ class AssetImporterMixin:
                     except Exception:
                         LOGGER.debug("Could not focus first imported custom unit", exc_info=True)
                 if hasattr(self, "refresh_placed_units_tree") and placed:
-                    self.refresh_placed_units_tree(select_id=self.session.placed_unit_index(placed[0]))
+                    self.refresh_placed_units_tree(select_id=placed[0].creation_number)
 
                 if visual_queue:
                     summary = self._msg(

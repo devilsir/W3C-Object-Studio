@@ -1,0 +1,50 @@
+{
+  "map": "MeuMapa.w3m",
+  "output": "MeuMapa_CUSTOMS.w3m",
+  "root": "war3mapImported\\Custom",
+  "compact": false,
+  "models": [
+    "assets/HeroPrincipal.mdx",
+    "assets/HeroPrincipal_Portrait.mdx",
+    "assets/Estatua.mdx"
+  ],
+  "textures": [
+    "assets/HeroBody.blp",
+    "assets/HeroCape.blp",
+    "assets/Estatua.blp"
+  ],
+  "objects": [
+    {
+      "type": "hero",
+      "base": "Hpal",
+      "id": "H001",
+      "name": "Meu Hero Custom",
+      "model": "assets/HeroPrincipal.mdx",
+      "scale": 1.15,
+      "fields": {
+        "hero_strength": 45,
+        "hero_agility": 35,
+        "hero_intelligence": 30,
+        "move_speed": 320,
+        "attack1_base": 55,
+        "attack1_cooldown": 1.7
+      },
+      "mods": [
+        {"field": "uhab", "type": "string", "value": "A000,A001,A002,A003"}
+      ]
+    },
+    {
+      "type": "doodad",
+      "base": "LTlt",
+      "id": "D001",
+      "name": "Estatua Custom",
+      "model": "assets/Estatua.mdx",
+      "scale": 1.4,
+      "fields": {
+        "selectable": 0,
+        "variations": 1
+      }
+    }
+  ],
+  "extra_assets": []
+}

@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>WC3 Model Viewer</title>
+  <link rel="stylesheet" href="viewer.css" />
+</head>
+<body>
+  <main class="shell">
+    <header class="topbar">
+      <div>
+        <strong>WC3 MODEL VIEWER</strong>
+        <span id="status">Solte um MDX/MDL + texturas ou escolha arquivos.</span>
+      </div>
+      <label class="pick">Abrir arquivos<input id="files" type="file" multiple accept=".mdx,.mdl,.blp,.tga,.dds,.png,.jpg,.jpeg" /></label>
+    </header>
+    <section class="stage" id="dropzone">
+      <canvas id="canvas"></canvas>
+      <div class="empty" id="empty">
+        <b>MDX / MDL</b>
+        <span>arraste o modelo e as texturas aqui</span>
+      </div>
+      <div class="loading-overlay" id="loadingOverlay" hidden>
+        <div class="loading-spinner"></div>
+        <b id="loadingText">Carregando modelo…</b>
+        <span>preparando modelo e texturas</span>
+      </div>
+      <aside class="controls">
+        <label>Animação<select id="animation"></select></label>
+        <label id="effectRow" hidden>Efeito<select id="effectSelect"></select></label>
+        <span id="sceneInfo" class="scene-info"></span>
+        <label>Team color<input id="team" type="color" value="#ff1d25" /></label>
+        <label>Zoom<input id="zoom" type="range" min="20" max="2000" value="300" /></label>
+        <label class="inline"><input id="wire" type="checkbox" /> Wireframe</label>
+        <button id="play">Pause</button>
+        <button id="reset">Reset camera</button>
+      </aside>
+      <div class="badge" id="badge">war3-model 4.x</div>
+    </section>
+    <footer>
+      <span>L: girar · R: mover · wheel: zoom · meio: câmera</span>
+      <span id="modelInfo"></span>
+    </footer>
+  </main>
+  <script src="vendor/gl-matrix-min.js" onerror="this.onerror=null;this.src='https://cdn.jsdelivr.net/npm/gl-matrix@3.4.3/gl-matrix-min.js'"></script>
+  <script src="vendor/war3-model.browser.js"></script>
+  <script src="viewer.js"></script>
+</body>
+</html>
